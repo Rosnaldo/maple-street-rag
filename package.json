@@ -11,8 +11,7 @@
     "eval": "tsx scripts/eval.ts",
     "test": "tsx --test tests/*.test.ts",
     "typecheck": "tsc --noEmit",
-    "chunks": "tsx scripts/inspect-chunks.ts",
-    "compare": "tsx scripts/compare-retrieval.ts"
+    "chunks": "tsx scripts/inspect-chunks.ts"
   },
   "author": "",
   "license": "UNLICENSED",

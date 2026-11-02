@@ -1,0 +1,6 @@
+{
+  "files": {
+    "hours.txt": { "title": "Store hours", "audience": "public", "effective": "2025-01-01" },
+    "staff-schedule.csv": { "title": "Staff schedule", "audience": "staff", "effective": "2025-01-01" }
+  }
+}

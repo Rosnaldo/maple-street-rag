@@ -29,7 +29,7 @@ export interface HybridSearchDeps {
  */
 export async function hybridSearch(query: string, k: number, deps: HybridSearchDeps): Promise<RetrievedChunk[]> {
   const snapshot = deps.store.current();
-  const keywordHits = snapshot.keywordSearch(query, CANDIDATES_PER_RETRIEVER);
+  const keywordHits = keywordCandidates(query, deps);
   const vectorHits = await vectorCandidates(query, deps);
 
   const weights = vectorHits.length ? deps.weights : { vector: 0, keyword: 1 };
@@ -49,6 +49,10 @@ export async function hybridSearch(query: string, k: number, deps: HybridSearchD
     .map((hit, i) => ({ ...hit, rerankScore: rerankScores[i] }))
     .sort((a, b) => b.rerankScore - a.rerankScore)
     .slice(0, k);
+}
+
+function keywordCandidates(query: string, deps: HybridSearchDeps): ScoredId[] {
+  return deps.store.current().keywordSearch(query, CANDIDATES_PER_RETRIEVER);
 }
 
 async function vectorCandidates(query: string, deps: HybridSearchDeps): Promise<ScoredId[]> {
