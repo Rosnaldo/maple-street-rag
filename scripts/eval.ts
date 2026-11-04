@@ -1,12 +1,17 @@
 import "dotenv/config";
-import { readFile, writeFile } from "node:fs/promises";
+import { readdir, readFile, writeFile } from "node:fs/promises";
+import { SYSTEM_PROMPT } from "../src/chat/prompt.js";
+import { QUERY_REWRITE_PROMPT } from "../src/chat/queryRewrite.js";
 import { checkCase, type EvalCase, type FinalReply } from "./evalChecks.js";
+import { compareRuns } from "./evalCompare.js";
 import { renderReport, type CaseResult, type EvalRun } from "./evalReport.js";
 
 const BASE_URL = process.env.EVAL_BASE_URL ?? `http://localhost:${process.env.PORT ?? 3000}`;
 const CASES_FILE = process.env.EVAL_CASES ?? "cases.json";
-const RESULTS_FILE = "eval-results.json";
-const REPORT_FILE = "eval-results.html";
+// Each run writes the next version: eval-results.v1.json/.html, then v2, ...
+const resultsFile = (version: number) => `eval-results.v${version}.json`;
+const reportFile = (version: number) => `eval-results.v${version}.html`;
+const compareFile = (base: number, next: number) => `compared-results.v${base}-v${next}.html`;
 // Parallel conversations; each one is a few API calls, so higher values only cost rate limit headroom.
 const CONCURRENCY = Number(process.env.EVAL_CONCURRENCY || 1);
 const REQUEST_TIMEOUT_MS = 200_000; // above LLM_TIMEOUT_MS (with retries) so the server answers first
@@ -28,14 +33,31 @@ async function main(): Promise<void> {
   const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
   console.log(`\nTotal: ${passed}/${results.length} passed (${seconds}s)`);
 
-  const merged = cases.length < allCases.length ? await mergeWithPrevious(allCases, results) : results;
+  const previousVersion = await latestVersion();
+  const previous = previousVersion ? (JSON.parse(await readFile(resultsFile(previousVersion), "utf8")) as EvalRun) : undefined;
+  const version = previousVersion + 1;
+
+  const merged = cases.length < allCases.length ? mergeWithPrevious(allCases, results, previous) : results;
   const mergedPassed = merged.filter((result) => result.pass).length;
   if (merged !== results) console.log(`Report (with earlier results for the other cases): ${mergedPassed}/${merged.length} passed`);
 
-  const run: EvalRun = { runAt: new Date().toISOString(), baseUrl: BASE_URL, passed: mergedPassed, total: merged.length, results: merged };
-  await writeFile(RESULTS_FILE, JSON.stringify(run, null, 2));
-  await writeFile(REPORT_FILE, renderReport(run));
-  console.log(`Details written to ${RESULTS_FILE} and ${REPORT_FILE}`);
+  const prompts = { answer: SYSTEM_PROMPT, queryRewrite: QUERY_REWRITE_PROMPT };
+  const run: EvalRun = { runAt: new Date().toISOString(), baseUrl: BASE_URL, prompts, passed: mergedPassed, total: merged.length, results: merged };
+  await writeFile(resultsFile(version), JSON.stringify(run, null, 2));
+  await writeFile(reportFile(version), renderReport(run));
+  console.log(`Details written to ${resultsFile(version)} and ${reportFile(version)}`);
+
+  if (!previous) return;
+  console.log(`Comparing with v${previousVersion}...`);
+  const comparison = await compareRuns({ label: `v${previousVersion}`, run: previous }, { label: `v${version}`, run });
+  await writeFile(compareFile(previousVersion, version), comparison.html);
+  console.log(`${comparison.changes} changed answer(s) written to ${compareFile(previousVersion, version)}`);
+}
+
+/** Highest N among eval-results.vN.json in the working directory; 0 when there is none. */
+async function latestVersion(): Promise<number> {
+  const versions = (await readdir(".")).map((file) => /^eval-results\.v(\d+)\.json$/.exec(file)?.[1]).filter(Boolean).map(Number);
+  return Math.max(0, ...versions);
 }
 
 /** Case ids from the command line (npm run eval -- hours-04 returns-01); none means all cases. */
@@ -52,17 +74,12 @@ function selectCases(cases: EvalCase[], args: string[]): EvalCase[] {
 }
 
 /**
- * A partial run replaces only its own cases in the previous results; the others keep
- * their last answer. Ordered as in the cases file; cases no longer in it are dropped.
+ * A partial run replaces only its own cases in the previous version's results; the others
+ * keep their last answer. Ordered as in the cases file; cases no longer in it are dropped.
+ * With no earlier version the report shows only the cases run now.
  */
-async function mergeWithPrevious(allCases: EvalCase[], results: CaseResult[]): Promise<CaseResult[]> {
-  let previous: CaseResult[] = [];
-  try {
-    previous = (JSON.parse(await readFile(RESULTS_FILE, "utf8")) as EvalRun).results;
-  } catch {
-    // No earlier run: the report shows only the cases run now.
-  }
-  const byId = new Map([...previous, ...results].map((result) => [result.id, result]));
+function mergeWithPrevious(allCases: EvalCase[], results: CaseResult[], previous: EvalRun | undefined): CaseResult[] {
+  const byId = new Map([...(previous?.results ?? []), ...results].map((result) => [result.id, result]));
   return allCases.flatMap((evalCase) => byId.get(evalCase.id) ?? []);
 }
 

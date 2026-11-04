@@ -6,7 +6,7 @@ const RewriteSchema = z.object({
   query: z.string().describe("The customer's latest message rewritten as a standalone search query"),
 });
 
-const SYSTEM = `You turn the latest message in a hardware store chat into a standalone search query.
+export const QUERY_REWRITE_PROMPT = `You turn the latest message in a hardware store chat into a standalone search query.
 Resolve pronouns and references ("it", "that one", "and the pressure washer?") using the conversation, and fix obvious typos.
 Keep the customer's intent and wording otherwise; do not answer the question or add facts.
 If the latest message is unrelated to the earlier conversation, return it unchanged.`;
@@ -21,7 +21,7 @@ export async function rewriteQuery(llm: Llm, history: Turn[], message: string): 
 
   const conversation = history.map((turn) => `${turn.role === "user" ? "Customer" : "Assistant"}: ${turn.content}`);
   const { query } = await llm.generate({
-    system: SYSTEM,
+    system: QUERY_REWRITE_PROMPT,
     messages: [
       {
         role: "user",

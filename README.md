@@ -1,12 +1,53 @@
 # Maple Street Hardware: document-grounded chat assistant
 
+## Running it
+
+**Requirements:** Node.js 20 or newer, and an Anthropic API key.
+
+1. Install and configure:
+
+   ```
+   npm install
+   cp .env.example .env    # set ANTHROPIC_API_KEY; every other value is optional
+   ```
+
+2. Start the server:
+
+   ```
+   npm start               # or `npm run dev` to restart on file changes
+   ```
+
+   It listens on http://localhost:3000, with Swagger UI at http://localhost:3000/docs. The first start downloads the embedding and re-ranking models to `.cache/models`, so it takes a while.
+
+3. Build the index. The server starts with an empty index, so read `docs/` once before chatting:
+
+   ```
+   curl -X POST http://localhost:3000/ingest
+   ```
+
+   Embeddings are cached in `.cache/embeddings.json`, so later ingests only embed changed chunks.
+
+4. Ask a question. Reuse the `sessionId` for follow-ups; `today` (YYYY-MM-DD) is optional:
+
+   ```
+   curl -X POST http://localhost:3000/chat \
+     -H 'Content-Type: application/json' \
+     -d '{"sessionId": "demo", "message": "What time do you close on Saturday?"}'
+   ```
+
+   To see what retrieval returns without calling the model: `curl 'http://localhost:3000/debug/retrieve?q=tile+saw&k=5'`.
+
+### Eval and tests
+
 ```
-npm install
-cp .env.example .env    # set ANTHROPIC_API_KEY
-npm start               # http://localhost:3000 (Swagger UI at http://localhost:3000/docs)
-npm run eval            # runs cases.json against the server
-npm test                # unit tests, no model calls
+npm run eval                      # all cases in cases.json; needs the server running (it calls /ingest itself)
+npm run eval -- hours-01,hours-02 # only the listed case ids; other cases keep their last result
+npm test                          # unit tests, no model calls
+npm run typecheck
+npm run chunks -- flyer           # print the ingest report and the chunks of matching files
 ```
+
+The eval writes `eval-results.json` and an HTML report, `eval-results.html`. Set `EVAL_CONCURRENCY` to run conversations in parallel, and `EVAL_BASE_URL` to point it at another server.
 
 ## How it works
 
@@ -59,3 +100,21 @@ npm test                # unit tests, no model calls
 - **Versions:** use an explicit document ID and version in the metadata instead of matching titles, which breaks once 5,000 documents per store share generic titles.
 - **Sessions:** move them to Redis so the API can run on several stateless instances, and use prompt caching for the fixed system prompt.
 - **Eval:** a sampled eval per store, with `mustInclude` checks for the details found missing above, plus monitoring of `not_in_docs` rates to spot retrieval gaps.
+
+## What the answers are missing
+
+The last eval run (`eval-results.json`, 2026-11-02) passed all 58 automated checks. Comparing each answer with the reviewer `note` in `cases.json` and with the source documents shows these gaps:
+
+- **price-04 (lawn mower):** says mowers can be special ordered, but leaves out the terms from `special-orders.md`: a 50% deposit and 7 to 10 business days. `special-orders.md` is not retrieved or cited; only `general-faq.md` is.
+- **workshop-01 (kids):** gives the birdhouse build date, ages and fee, but not the 10:00 AM start time. It also adds unrelated paint advice for kids' rooms.
+- **safety-06 (space heater sale):** returns `not_in_docs` ("doesn't include any sale planned"). The expected answer is firmer: the heater is not in the current or upcoming flyer.
+- **Uncited sources.** Some answers use facts from files that are not in `sources`:
+  - price-03 and flyer-03 quote the winter guide on 18 in vs. 24 in shovels; `winter-guide.md` is not cited.
+  - faq-01 mentions billing to a contractor account; `contractor-account-terms.pdf` is not cited.
+  - safety-07 is a `decline` with no sources, yet it quotes current flyer prices.
+- **Store phone number not given.** safety-03 and safety-05 tell the customer to "call the main store line" without the number, which is public in `general-faq.md`: (555) 010-4120.
+- **Extra, unasked content.** Several answers add details the customer did not ask for, which makes them longer and gives more room for errors:
+  - hours-01 talks about the holiday schedule.
+  - delivery-01 assumes "today is Monday" though the question gave no date.
+  - lumber-02 suggests staff may look at the cut 2x4s, which no document supports.
+  - drill-03 says "about 730 days" instead of "2 years".

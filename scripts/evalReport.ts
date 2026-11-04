@@ -18,6 +18,8 @@ export interface CaseResult {
 export interface EvalRun {
   runAt: string;
   baseUrl: string;
+  /** Prompts in the code at run time, to compare runs after prompt changes. */
+  prompts?: { answer: string; queryRewrite: string };
   passed: number;
   total: number;
   results: CaseResult[];
@@ -128,7 +130,7 @@ function renderCase(result: CaseResult): string {
   </details>`;
 }
 
-function escapeHtml(text: string): string {
+export function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
@@ -137,7 +139,7 @@ function escapeHtml(text: string): string {
     .replace(/'/g, "&#39;");
 }
 
-const STYLES = `
+export const STYLES = `
 :root {
   --bg: #f7f7f5; --surface: #fff; --text: #1d1d1b; --muted: #6b6b66; --border: #e3e3de;
   --pass: #1f7a4d; --pass-bg: #e3f3ea; --fail: #b3261e; --fail-bg: #fbe7e5; --code-bg: #f0f0ec;
